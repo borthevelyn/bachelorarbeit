@@ -7,19 +7,16 @@ open Averest.MiniC.IO
 open Averest.MiniC.Types
 open Averest.MiniC.DataflowProcessNetworks
 open System
-open System.Collections.Generic
-
-
 
 let WriteCLCode mncs =
-    // generate proram and dpn
+    // generate program and dpn
     let errorStr = Some Console.Out
     let mncPrg = ParseMiniCFromString errorStr mncs
     let unleveledDpn = (MiniC2DPN mncPrg)[0]
     WriteDPN2Dotfile "myDPN.gv" unleveledDpn None None None
     let (dpn, _, nodeLevels, _) = LevelizeDPN false false unleveledDpn
     WriteDPN2Dotfile "myLeveledDPN.gv" dpn None None None
-    
+
     // analyze buffer types
     let varTypes : Map<string, string> =
         dpn.buffers
@@ -31,7 +28,7 @@ let WriteCLCode mncs =
             | None -> raise (Exception "couldn't identify variable type"))
         |> Set.toList
         |> Map.ofList
-
+    
     // analyze vertex disjoint paths for deadlocks    
     let (edges, paths) = MinimumNumberOfVertexDisjointPathsDPN dpn
     let pathsList = Set.toList paths
@@ -54,7 +51,34 @@ let WriteCLCode mncs =
     let resolvedPathBuffers =
         resolvedPaths
         |> Set.map (fun x -> (x, snd (calculatePathBuffers dpn x)))
+    
+    let oneNodePaths = 
+         seq { 0 .. dpn.nodes.Length-1 }
+        |> Set.ofSeq
+        |> Set.map(fun x -> let (outA, _ , inA) = dpn.nodes[x]     
+                            ([x], (PathBuffers) (List.ofArray(inA), List.ofArray(outA))))
 
+    //Console.WriteLine (generateCLCode dpn varTypes oneNodePaths)
     Console.WriteLine (generateCLCode dpn varTypes resolvedPathBuffers)
+
+    let minPathLength (path:Set<list<int> * PathBuffers>) = 
+        path
+        |>Set.map(fun x -> let a,b = x
+                           a.Length)
+        |>Set.minElement
+
+    let maxPathLength (path:Set<list<int> * PathBuffers>) = 
+        path
+        |>Set.map(fun x -> let a,b = x
+                           a.Length)
+        |>Set.maxElement
+
+    
+    Console.WriteLine ("              |".PadLeft(22) +  "Variante 1".PadLeft(10) + "|".PadRight(2) + "Variante 2 " + "\n" +
+                       "Threads:            " + "|".PadLeft(2)+ oneNodePaths.Count.ToString().PadRight(10) + "|".PadRight(2) + resolvedPathBuffers.Count.ToString() + "\n" +
+                       "Knotenanzahl:       " + "|".PadLeft(2) + dpn.nodes.Length.ToString().PadRight(10)  + "|".PadRight(2) + dpn.nodes.Length.ToString() + "\n" +
+                       "Minimale Pfadlänge: " + "|".PadLeft(2) + (minPathLength oneNodePaths).ToString().PadRight(10) + "|".PadRight(2) + (minPathLength resolvedPathBuffers).ToString() + "\n" +
+                       "Maximale Pfadlänge: " + "|".PadLeft(2) + (maxPathLength oneNodePaths).ToString().PadRight(10) + "|".PadRight(2) + (maxPathLength resolvedPathBuffers).ToString() )
+   
 
         

@@ -1,0 +1,7 @@
+/.vscode
+/bin
+/CTest
+/myDPN.gv
+/myLeveledDPN.gv
+/obj
+.fake
