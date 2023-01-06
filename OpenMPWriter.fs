@@ -1,12 +1,13 @@
-module Translator.CLWriter
-
+module Translator.OpenMPWriter
 open Translator.PathAnalyzer
 open Averest.MiniC.DataflowProcessNetworks
 open Averest.MiniC.Types
 open System
-open System.Collections.Generic
 
 let tabSpace = "    "
+let tabSpace2 = "       "
+let tabSpace3 = "           "
+let tabSpace4 = "               "
 
 let generateMethodCode dpn (bufferTypes : Map<string, string>) path buffers name : string =
     let (input, output) = buffers
@@ -71,10 +72,17 @@ let generateMethodCode dpn (bufferTypes : Map<string, string>) path buffers name
     code <- code + "}\n"
     code
 
-let generateCLCode dpn (bufferTypes : Map<string, string>) (pathsAndBuffers : Set<(int list) * PathBuffers>) : string =
+let generateOpenMPCode dpn (bufferTypes : Map<string, string>) (pathsAndBuffers : Set<(int list) * PathBuffers>) : string =
     let mutable code = ""
-    let mutable count = 0;
+    let mutable count = 0
     let mutable calc = dpn.inVars
+    
+    printfn "Enter data size:"
+    let datasize = int32 (System.Console.ReadLine())
+    printfn "Enter input:"
+    let input = System.Console.ReadLine()
+           
+    code <- sprintf "%s#include<stdio.h>\n#include<omp.h>\n#define DATA_SIZE %d\n\n" code datasize
 
     for pathBuffer in pathsAndBuffers do
         let (path, buffer) = pathBuffer
@@ -82,39 +90,59 @@ let generateCLCode dpn (bufferTypes : Map<string, string>) (pathsAndBuffers : Se
         count <- count + 1
     
     count <- 0
-    code <- code + "__kernel void Execute(__global int* inputs, __global int* outputs) { \n    size_t threadId = get_global_id(0); \n"
-    dpn.inVars |> Set.iter (fun x  -> 
-        code <- code + tabSpace + bufferTypes[x] + " "+ x.ToString() + " = inputs[threadId * "
-            + dpn.inVars.Count.ToString() + " + " + count.ToString() + "];\n"
-        count <- count + 1
-        )
-
+    code <- sprintf "%sint main() { \n%sint inputs[] = {%s} \n%sint outputs = [DATA_SIZE * 2]\n" code tabSpace input tabSpace
+           
     let paths = pathsAndBuffers |> Set.toList
     let mutable remainingPaths = {0..paths.Length-1}
                                 |>Seq.toList
+    
+    code <- sprintf "%s%s#pragma omp parallel for \n%sfor (int i = 0; i < DATA_SIZE; i++) {\n" code tabSpace tabSpace
 
+    dpn.inVars |> Set.iter (fun x  -> 
+    code <- sprintf "%s%s%s %s = inputs[i * %d + %d];\n" code tabSpace2 bufferTypes[x] (x.ToString()) dpn.inVars.Count count
+    count <- count + 1
+    )
+
+    for i in remainingPaths do
+        let (_, output) = snd paths[i]
+        output|> List.iter(fun x -> code <- sprintf "%s%s%s %s;\n" code tabSpace2 bufferTypes[x] x)
 
     while not (remainingPaths.IsEmpty) do
         let mutable executablePaths = List.Empty
         for i in remainingPaths do
-            let (input, output) = snd paths[i]
+            let (input,_) = snd paths[i]
             if List.forall calc.Contains input then
                 // path can be executed
-                calc <- calc |> Set.union (output |> Set.ofList)
                 executablePaths <- i::executablePaths
                 remainingPaths <- List.removeAt(List.findIndex (fun x-> x = i) remainingPaths) remainingPaths
-
+        
         for i in executablePaths do
-            let (input, output) = snd paths[i]
-            output |> List.iter (fun x -> code <- code + tabSpace + bufferTypes[x] + " " + x + ";\n")
-            code <- code + tabSpace + "path" + i.ToString() + "(" 
-            input |> List.iter (fun x -> code <- code + x + ", ")
-            output |> List.iter (fun x -> code <- code + "&" + x + ", ")
-            code <- code[0 ..  code.Length - 3] + ");\n\n"
+            let (_, output) = snd paths[i]
+            calc <- calc |> Set.union (output |> Set.ofList)
+        
+        let writePath name input output tabSpace =
+            code <- sprintf "%s%spath%d(" code tabSpace name  
+            input |> List.iter (fun x -> code <- sprintf "%s%s, " code x)
+            output |> List.iter (fun x -> code <- sprintf "%s&%s, "code x)
+            code <- code[0 ..  code.Length - 3] + ");\n"
 
+        if (executablePaths.Length = 1) then
+            let (input,output) = snd paths[executablePaths[0]]
+            writePath executablePaths[0] input output tabSpace2
+        else 
+            code <- sprintf "%s%s#pragma omp parallel sections\n%s{\n" code tabSpace2 tabSpace2
+            for i in executablePaths do
+                let (input, output) = snd paths[i]
+                code <-sprintf "%s%s#pragma omp section\n" code tabSpace3
+                writePath i input output tabSpace4
+
+            code <- sprintf "%s%s}\n" code tabSpace2
+    
     count <- 0
     dpn.outVars |> Set.iter (fun x -> 
-        code  <- sprintf"%s%soutputs[threadId * %d + %d] = %s;\n"code  tabSpace  dpn.outVars.Count  count  x 
+        code  <- sprintf"%s%soutputs[i * %d + %d] = %s;\n"code  tabSpace2  dpn.outVars.Count  count  x 
         count <- count + 1)
-    code <- code +  "}"
+    code <- sprintf "%s%s}\n"code tabSpace
+    code <- sprintf "%sprintf(b: %%i, c: %%i, outputs[0], outputs[1]);\n" code
+    code <- sprintf "%sprintf(b: %%i, c: %%i, outputs[2], outputs[3]);\n}" code
     code

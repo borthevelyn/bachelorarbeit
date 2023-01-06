@@ -3,6 +3,7 @@ module Translator.Main
 open Translator.Types
 open Translator.PathAnalyzer
 open Translator.CLWriter
+open Translator.OpenMPWriter
 open Averest.MiniC.IO
 open Averest.MiniC.Types
 open Averest.MiniC.DataflowProcessNetworks
@@ -58,8 +59,8 @@ let WriteCLCode mncs =
         |> Set.map(fun x -> let (outA, _ , inA) = dpn.nodes[x]     
                             ([x], (PathBuffers) (List.ofArray(inA), List.ofArray(outA))))
 
-    //Console.WriteLine (generateCLCode dpn varTypes oneNodePaths)
-    Console.WriteLine (generateCLCode dpn varTypes resolvedPathBuffers)
+    Console.WriteLine (generateOpenMPCode dpn varTypes oneNodePaths)
+    //Console.WriteLine (generateOpenMPCode dpn varTypes resolvedPathBuffers)
 
     let minPathLength (path:Set<list<int> * PathBuffers>) = 
         path
