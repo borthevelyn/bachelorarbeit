@@ -78,22 +78,25 @@ let generateOpenMPCode dpn (bufferTypes : Map<string, string>) (pathsAndBuffers 
     
     count <- 0
     dpn.outVars |> Set.iter (fun x -> 
-        code  <- sprintf"%s%soutputs[i * %d + %d] = %s;\n"code  tabSpace2  dpn.outVars.Count  count  x 
+        code  <- sprintf"%s%s outputs[i * %d + %d] = %s;\n"code  tabSpace2  dpn.outVars.Count  count  x 
         count <- count + 1
         )
     code <- sprintf "%s%s}\n"code tabSpace
-
-    count <- 0
-    while(count < datasize * inputArray.Length) do
+    
+    let mutable i = 0
+    while(i < inputArray.Length) do
         code <-sprintf "%sprintf(" code
         for out in dpn.outVars do
             code <- sprintf "%s%s: %%i, " code out
         code <- code[0 ..  code.Length - 3] + ","
-        for out in dpn.outVars do
-            code <- sprintf "%soutputs[%d]," code count
-        code <- code[0 ..  code.Length - 3] + ");"
+        count <- 0
+        dpn.outVars |> Set.iter (fun x -> 
+            code  <- sprintf"%soutputs[%d],"code  (i*dpn.outVars.Count + count )  
+            count <- count + 1
+            )
+        code <- code[0 ..  code.Length - 2] + ");\n"
+        i<- i+1
 
-    code <- code[0 ..  code.Length - 3] + ");\n"
     code <- sprintf "%sauto end = chrono::steady_clock::now();\nprintf(\"time: %%i\", (end - start).count());" code
     code
     
