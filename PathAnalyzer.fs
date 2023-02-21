@@ -41,6 +41,21 @@ let traversePathBuffer dpn path writeTo readFrom =
             writeTo outA[1]
         | Const _ ->
             writeTo outA[0]
+        | ParITE -> readFrom inA[0]
+                    readFrom inA[1]
+                    readFrom inA[2]
+                    writeTo outA[0]
+        | Join -> readFrom inA[0]
+                  readFrom inA[1] 
+                  writeTo outA[0]  
+        | Load _ -> readFrom inA[0]
+                    readFrom inA[1]
+                    writeTo outA[0]
+                    writeTo outA[1]
+        | Store _ -> readFrom inA[0]
+                     readFrom inA[1]
+                     readFrom inA[2]
+                     writeTo outA[0]
         | _ ->
             raise (Exception "Undefined node in path")
 
@@ -102,6 +117,7 @@ let calculatePathDependency (paths : NamedPathBuffers list) pathName =
             
     result
 
+
 let rec traverseDependenciesTo dependencies from to_ visited : Set<PathDependency list> =
     let fromDeps = 
         dependencies 
@@ -121,8 +137,6 @@ let rec traverseDependenciesTo dependencies from to_ visited : Set<PathDependenc
 
     result
     
-
-
 
 /// <summary>
 /// Returns a set of deadlocks found.
@@ -167,7 +181,6 @@ let resolveDeadlocksPathJoin (nodeLevels : Map<int, int>) (paths : int list list
                 toJoin
                 |> Set.toList
                 |> List.collect id)
-
 
     pathsToJoin
     |> Set.map (List.collect (fun n -> paths[n]))
