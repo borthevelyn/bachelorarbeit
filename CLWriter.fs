@@ -7,10 +7,10 @@ open Averest.MiniC.DataflowProcessNetworks
 
 let tabSpace = "    "
 
-let generateCLCode dpn (bufferTypes : Map<string, Types.Buffer>) (pathsAndBuffers : Set<(int list) * PathBuffers>) : string =
+let generateCLCode dpn (bufferTypes : Map<string, Types.Buffer>) (pathsAndBuffers : Set<(int list) * PathBuffers>) mnc : string =
     let mutable code = ""
     let mutable count = 0
-    let mutable calc = dpn.inVars
+    let calc = calculateKnownVariables dpn mnc
 
     for pathBuffer in pathsAndBuffers do
         let (path, buffer) = pathBuffer
@@ -26,28 +26,15 @@ let generateCLCode dpn (bufferTypes : Map<string, Types.Buffer>) (pathsAndBuffer
         )
 
     let paths = pathsAndBuffers |> Set.toList
-    let mutable remainingPaths = 
-        { 0 .. paths.Length - 1 }
-        |> Seq.toList
 
-
-    while not (remainingPaths.IsEmpty) do
-        let mutable executablePaths = List.Empty
-        for i in remainingPaths do
-            let (input, output) = snd paths[i]
-            if List.forall calc.Contains input then
-                // path can be executed
-                calc <- calc |> Set.union (output |> Set.ofList)
-                executablePaths <- i::executablePaths
-                remainingPaths <- List.removeAt(List.findIndex (fun x-> x = i) remainingPaths) remainingPaths
-
+    findExectuablePaths paths calc (fun executablePaths ->
         for i in executablePaths do
             let (input, output) = snd paths[i]
             output |> List.iter (fun x -> code <- code + tabSpace + bufferTypes[x].TranslatedType + " " + x + ";\n")
             code <- code + tabSpace + "path" + i.ToString() + "(" 
             input |> List.iter (fun x -> code <- code + x + ", ")
             output |> List.iter (fun x -> code <- code + "&" + x + ", ")
-            code <- code[0 ..  code.Length - 3] + ");\n\n"
+            code <- code[0 ..  code.Length - 3] + ");\n\n")
 
     count <- 0
     dpn.outVars |> Set.iter (fun x -> 

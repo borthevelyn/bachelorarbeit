@@ -39,6 +39,21 @@ let isArrayBuffer buffer =
     | Carr _ -> true
     | _ -> false
 
+let arraySize arr = 
+    match arr.TypeC with
+        | Carr (Some count, _) -> count
+        | _ -> raise (System.Exception "The type should be an array")
+
+let rec collapseArray typeC =
+    match typeC with
+    | Carr (Some len1, inner) ->
+        match collapseArray inner with
+        | Carr (Some len2, primitive) -> 
+            Carr (Some (len1 * len2), primitive)
+        | _ -> typeC
+    | _ -> typeC
+
+
 
 let constructBuffer typeC name producer =
     match typeCtoStr typeC with
@@ -51,74 +66,87 @@ let constructBuffer typeC name producer =
             Producer = producer
         }
 
-/// <summary>
-/// Given a dpn, a table of predefined type of buffers and a buffer name, this function
-/// will return the type of the given buffer name.
-/// </summary>
-let rec lookupBufferType dpn defs buffer : Buffer =
-    // look up in defined table
-    let opt = Array.tryFind (fun x -> fst x = buffer) defs
+let rec buildBufferTypeLookup dpn (defs : Map<string, Buffer>) buffers : Map<string, Buffer> =
+    /// <summary>
+    /// Given a dpn, a table of predefined type of buffers and a buffer name, this function
+    /// will return the type of the given buffer name.
+    /// </summary>
+    let rec lookupBufferType dpn (defs : Map<string, Buffer>) buffer : Map<string, Buffer> =
+        // look up in defined table
+        match Map.tryFindKey (fun x _ -> x = buffer) defs with
+        | Some _ -> defs
+        | None ->
 
-    let constructStandardFromType typeC =
-        constructBuffer typeC buffer Standard
+        let returnCustomBuffer custombuffer =
+            defs |> Map.add buffer custombuffer
+        let returnStandardBuffer typeC =
+            returnCustomBuffer (constructBuffer typeC buffer Standard)
+        let returnConstantBuffer typeC =
+            returnCustomBuffer (constructBuffer typeC buffer Constant)
 
-    let constructFromRecursion name =
-        let recursed = lookupBufferType dpn defs name
-        constructStandardFromType recursed.TypeC
+        let returnRecursion prev =
+            let recursedDefs = lookupBufferType dpn defs prev
+            recursedDefs |> Map.add buffer (constructBuffer recursedDefs[prev].TypeC buffer Standard)
 
-    match opt with
-    | Some v -> snd v
-    | None ->
         // analyze node types
         let (outA, dp, inA) = dpn.nodes[dpn.prod[buffer]]
         match dp with
         | BinOp op ->
             match op with
-            | AddN | MulN | DivN | SubN | ModN -> constructStandardFromType Cnat
-            | AddZ | MulZ | DivZ | SubZ | ModZ -> constructStandardFromType Cint
-            | _ -> constructStandardFromType Cbool
+            | AddN | MulN | DivN | SubN | ModN -> returnStandardBuffer Cnat
+            | AddZ | MulZ | DivZ | SubZ | ModZ -> returnStandardBuffer Cint
+            | _ -> returnStandardBuffer Cbool
         | MonOp op ->
             match op with
-            | NotB | CastB -> constructStandardFromType Cbool
-            | CastN -> constructStandardFromType Cnat
-            | CastZ -> constructStandardFromType Cint
-        | Const value -> constructBuffer Cint buffer Constant
+            | NotB | CastB -> returnStandardBuffer Cbool
+            | CastN -> returnStandardBuffer Cnat
+            | CastZ -> returnStandardBuffer Cint
+        | Const value -> returnConstantBuffer Cint
         | Copy | Dup -> 
             // recursively look one level down
-            constructFromRecursion inA[0]
+            returnRecursion inA[0]
         // Input type is Cbool and for output type look recursively one level down
         | ParITE ->
-            constructFromRecursion inA[1]      
-        | Join -> constructFromRecursion inA[0]
+            returnRecursion inA[1]      
+        | Join -> returnRecursion inA[0]
         | Load _ -> 
             // load node has different outputs: one is a Carr and the other is the read value 
-            let x0 = constructFromRecursion inA[0]
-            let x1 = constructFromRecursion inA[1]
+            let newDefs1 = lookupBufferType dpn defs inA[0]
+            let newDefs2 = lookupBufferType dpn newDefs1 inA[1]
+
+            let x0 = newDefs2[inA[0]]
+            let x1 = newDefs2[inA[1]]
 
             match x0.TypeC with
             | Carr (_, t) -> 
                 match x1.TypeC with
                 | Cint | Cnat -> 
-                    constructBuffer 
+                    returnCustomBuffer
+                        (constructBuffer 
                         (if outA[0] = buffer then x0.TypeC else t) 
                         buffer
-                        (Loader (inA[0], inA[1]))
+                        (Loader (inA[0], inA[1])))
 
                 | _ -> raise (System.Exception "couldn't identify variable type") 
             | Cint | Cnat -> 
                 match x1.TypeC with
                 | Carr (_, t) -> 
-                    constructBuffer
+                    returnCustomBuffer
+                        (constructBuffer
                         (if outA[0] = buffer then x1.TypeC else t)
                         buffer
-                        (Loader (inA[1], inA[0]))
+                        (Loader (inA[1], inA[0])))
                 | _ -> raise (System.Exception "couldn't identify variable type")
             | _ -> raise (System.Exception "couldn't identify variable type")  
         | Store _ -> 
             // store node has three inputs: inA[0] = index, inA[1] = name, inA[2] = value
-            let x0 = constructFromRecursion inA[0]
-            let x1 = constructFromRecursion inA[1]
-            
+            let newDefs1 = lookupBufferType dpn defs inA[0]
+            let newDefs2 = lookupBufferType dpn newDefs1 inA[1]
+            let newDefs3 = lookupBufferType dpn newDefs2 inA[2]
+
+            let x0 = newDefs3[inA[0]]
+            let x1 = newDefs3[inA[1]]
+
             let indexName = 
                 if x0.Producer = Constant && (x0.TypeC = Cint || x0.TypeC = Cnat) then
                     inA[0]
@@ -146,10 +174,18 @@ let rec lookupBufferType dpn defs buffer : Buffer =
                 else
                     inA[0]
 
-            constructBuffer 
-                (constructFromRecursion arrayName).TypeC 
+            returnCustomBuffer
+                (constructBuffer 
+                (newDefs3[arrayName]).TypeC 
                 buffer 
-                (Storer (arrayName, indexName, valueName))
+                (Storer (arrayName, indexName, valueName)))
 
         | _ -> raise (System.Exception "couldn't identify node type")
+
+    let mutable currentDefs = defs
+    for buffer in buffers do
+        lookupBufferType dpn currentDefs buffer |>
+        Map.iter (fun newBufferName newBufferElem -> currentDefs <- currentDefs |> Map.add newBufferName newBufferElem)
+
+    currentDefs
 

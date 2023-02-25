@@ -21,15 +21,11 @@ let WriteCLCode mncs =
         Array.concat [(
             dpn.arrDecls
             |> Map.toArray
-            ); mncPrg.SharedVariables]
-        |> Array.map (fun entry -> fst entry, constructBuffer (snd entry) (fst entry) Standard)
+            ); mncPrg.SharedVariables] |> 
+        Array.map (fun entry -> fst entry, constructBuffer (collapseArray (snd entry)) (fst entry) Standard)
 
     // analyze buffer types
-    let varTypes : Map<string, Buffer> =
-        dpn.buffers
-        |> Set.map (fun bn -> (bn, lookupBufferType dpn preDefTypes bn)) // look up types for each buffer
-        |> Set.toList
-        |> Map.ofList
+    let varTypes : Map<string, Buffer> = buildBufferTypeLookup dpn (preDefTypes |> Map.ofArray) dpn.buffers
     
     // analyze vertex disjoint paths for deadlocks    
     let (edges, paths) = MinimumNumberOfVertexDisjointPathsDPN dpn
@@ -61,9 +57,8 @@ let WriteCLCode mncs =
                             ([x], (PathBuffers) (List.ofArray inA, List.ofArray outA)))
     
     
-    System.IO.File.WriteAllText("test.txt", generateOpenMPCode dpn varTypes oneNodePaths mncPrg)
-    //System.IO.File.WriteAllText("test.txt", generateOpenMPCode dpn varTypes resolvedPathBuffers mncPrg)
-    //printfn "%s" (generateOpenMPCode dpn varTypes resolvedPathBuffers mncPrg)
+    System.IO.File.WriteAllText("test1.cpp", generateOpenMPCode dpn varTypes oneNodePaths mncPrg)
+    System.IO.File.WriteAllText("test2.cpp", generateOpenMPCode dpn varTypes resolvedPathBuffers mncPrg)
 
     let minPathLength (path:Set<list<int> * PathBuffers>) = 
         path
@@ -86,3 +81,4 @@ let WriteCLCode mncs =
    
 
         
+

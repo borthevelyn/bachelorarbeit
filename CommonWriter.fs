@@ -4,52 +4,126 @@ open Averest.MiniC.DataflowProcessNetworks
 open Averest.MiniC.Types
 open Types
 open System
+open PathAnalyzer
 
 let tabSpace = "    "
 
-let generateMethodCode dpn (bufferTypes : Map<string, Types.Buffer>) path buffer name : string =
+
+let calculateKnownVariables dpn mnc =
+    (Set.unionMany  
+        [dpn.inVars; 
+        (mnc.SharedVariables 
+        |> Set.ofArray 
+        |> Set.map fst);
+        dpn.arrDecls
+        |> Map.keys
+        |> Set.ofSeq
+        ])
+
+let calculateArrayVariables dpn mnc =
+    Set.filter (isArrayBuffer)
+        (Set.union(mnc.SharedVariables
+            |> Set.ofArray
+            |> Set.map (fun entry -> constructBuffer (collapseArray (snd entry)) (fst entry) Standard))
+            (dpn.arrDecls
+            |> Map.map (fun name typeC -> constructBuffer (collapseArray typeC) name Standard)
+            |> Map.values
+            |> Set.ofSeq))
+       
+
+let findExectuablePaths (paths : list<list<int> * PathBuffers>) (calcIn : string Set) writePaths =
+    let mutable calc = calcIn
+    let mutable remainingPaths = 
+        { 0 .. paths.Length - 1 }
+        |> Seq.toList
+
+    while not (remainingPaths.IsEmpty) do
+        let mutable executablePaths = List.Empty
+        for i in remainingPaths do
+            let (input,_) = snd paths[i]
+            if List.forall calc.Contains input then
+                // path can be executed
+                executablePaths <- i::executablePaths
+                remainingPaths <- List.removeAt(List.findIndex (fun x-> x = i) remainingPaths) remainingPaths
+        if executablePaths.IsEmpty then raise (System.Exception "no executable paths") 
+        else
+        executablePaths |> List.iter(fun i ->
+            let (_, output) = snd paths[i]
+            calc <- calc |> Set.union (output |> Set.ofList)
+        )
+
+        writePaths executablePaths
+
+/// generate one path
+let generateMethodCode dpn (buffers : Map<string, Types.Buffer>) path buffer name : string =
     let (input, output) = buffer
 
     // write signature
     let mutable code = "void " + name + "("
-    input |> List.iter (fun x -> code <- code + bufferTypes[x].TranslatedType + " " + x + ", ")
-    //output |> List.iter (fun (x: string) -> if not (isArrayBuffer bufferTypes[x]) then code <- code + bufferTypes[x].TranslatedType + "* " + x + ", ")
-    output |> List.iter (fun (x: string) -> if not (List.contains x input) then
-                                                if  not (isArrayBuffer bufferTypes[x]) then 
-                                                    code <- code + bufferTypes[x].TranslatedType + "* " + x + ", "
-                                                else 
-                                                    code <- code + bufferTypes[x].TranslatedType + x + ", ")
+    input |> 
+    List.filter (fun i -> not (List.contains i output)) |>
+    List.iter (fun x -> code <- code + buffers[x].TranslatedType + " " + x + ", ")
+    output |> 
+    List.iter (fun (x: string) -> code <- sprintf "%s%s* %s, " code buffers[x].TranslatedType x)
     code <- code[0 .. code.Length - 3] + ") { \n"
+
+    let ioValues = input |> List.filter (fun i -> List.contains i output)
+
+    let formatArray name =
+        if List.contains name ioValues then
+            "(*" + name + ")"
+        else
+            name
 
     // helpers
     let formatWriteVariable name =
-        if  List.contains name output then
+        if List.contains name output then
             "*" + name
         else
-            bufferTypes[name].TranslatedType + " " + name
+            buffers[name].TranslatedType + " " + name
+
+    let formatReadVariable value =
+        if ioValues |> List.contains value then
+            "*" + value
+        else
+            value
+        
 
     let writeBodyInst str =
         code <- code + tabSpace + str + "\n"
 
-    let writeAssign varName value = 
+    let writeRename varName value = 
         if varName = value then
             ()
         else
-            writeBodyInst ((formatWriteVariable varName) + " = " + value + ";")
+            writeBodyInst ((formatWriteVariable varName) + " = " + (formatReadVariable value) + ";")
+        
+    let writeUnaryOperation varName value op =
+        writeBodyInst ((formatWriteVariable varName) + " = " + op + (formatReadVariable value) + ";")
 
-    let writeAssignFormula out v1 op v2 =
-        writeBodyInst ((formatWriteVariable out) + " = " + (v1 + op + v2) + ";")
+    let writeBinaryOperation out v1 op v2 =
+        writeBodyInst ((formatWriteVariable out) + " = " + ((formatReadVariable v1) + op + (formatReadVariable v2)) + ";")
+
+    let writeStore arrName index value =
+        writeBodyInst (sprintf "%s[%s] = %s;" (formatArray arrName) index value)
+    
+    let writeLoad arrName index var =
+        writeBodyInst (sprintf "%s %s = %s[%s];" buffers[var].TranslatedType var (formatArray arrName) index)
+
+    let writeArrayRename newVar oldArr =
+        writeBodyInst (sprintf "%s %s = %s;" buffers[newVar].TranslatedType newVar (formatArray oldArr))
 
     let writeDeclaration name =
-        writeBodyInst (bufferTypes[name].TranslatedType + " " + name + ";")
+        if not (List.contains name output) then
+            writeBodyInst (buffers[name].TranslatedType + " " + name + ";")
 
     for node in path do
         let (outA, dp, inA) = dpn.nodes[node]
         match dp with
-        | Copy -> writeAssign outA[0] inA[0]
+        | Copy -> writeRename outA[0] inA[0]
         | Dup -> 
-            writeAssign outA[0] inA[0]
-            writeAssign outA[1] inA[0]
+            writeRename outA[0] inA[0]
+            writeRename outA[1] inA[0]
         | BinOp op -> 
             let sign = 
                 match op with
@@ -66,41 +140,33 @@ let generateMethodCode dpn (bufferTypes : Map<string, Types.Buffer>) path buffer
                 | NeqN | NeqZ | NeqB -> " != "
         
 
-            writeAssignFormula outA[0] inA[0] sign inA[1]
+            writeBinaryOperation outA[0] inA[0] sign inA[1]
 
         | MonOp op ->
             match op with
-            | NotB -> writeAssign outA[0] ("!" + inA[0])
-            | CastB -> writeAssign outA[0] ("(bool)" + inA[0])
-            | CastN | CastZ -> writeAssign outA[0] ("(int)" + inA[0])
-        | Const value -> writeAssign outA[0] (value.ToString())
-        | Join -> writeAssign outA[0] inA[1]
+            | NotB -> writeUnaryOperation outA[0] inA[0] "!"
+            | CastB -> writeUnaryOperation outA[0] inA[0] "(bool)"
+            | CastN | CastZ -> writeUnaryOperation outA[0] inA[0] "(int)"
+        | Const value -> writeRename outA[0] (string value)
+        | Join -> writeRename outA[0] inA[1]
         | Load x -> 
-            let valueOut = if isArrayBuffer bufferTypes[outA[1]] then 0 else 1
+            let valueOut = if isArrayBuffer buffers[outA[1]] then 0 else 1
             let arrayOut = if valueOut = 1 then 0 else 1
-            let selectedIn = if not (isArrayBuffer bufferTypes[inA[0]]) then 0 else 1
+            let selectedIn = if not (isArrayBuffer buffers[inA[0]]) then 0 else 1
             let arrayIn = if selectedIn = 1 then 0 else 1
-            writeAssign outA[valueOut] (inA[arrayIn] + "[" + inA[selectedIn] + "]")
-            writeAssign outA[arrayOut] inA[arrayIn]
+            writeLoad inA[arrayIn] inA[selectedIn] outA[valueOut]
+            writeArrayRename outA[arrayOut] inA[arrayIn]
                          
-        | Store x -> 
-            let bufferName = 
-                dpn.prod
-                |> Map.tryPick (fun key value -> 
-                    if value = node then 
-                        match bufferTypes[key].Producer with
-                        | Storer _ -> Some key
-                        | _ -> None
-                    else None)
-            
-            writeBodyInst (sprintf "%s[%s] = %s;" inA[1] inA[0] inA[2])
-            writeAssign outA[0] inA[1]
+        | Store x ->             
+            writeStore inA[1] inA[0] inA[2]
+            writeArrayRename outA[0] inA[1]
 
         | ParITE-> 
+            writeDeclaration outA[0]
             code <- sprintf "%s%sif ( %s ) {\n%s" code  tabSpace inA[0] tabSpace
-            writeBodyInst ("*" + outA[0] + " = " +  inA[1] + ";")
+            writeRename outA[0] inA[1]
             code <- code + tabSpace + "} else  { \n" + tabSpace
-            writeBodyInst ("*" + outA[0] + " = " +  inA[2] + ";")
+            writeRename outA[0] inA[2]
             code <- code + tabSpace + "} \n"
         | _ -> raise (Exception "Undefined node in path")
 

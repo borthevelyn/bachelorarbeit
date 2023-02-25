@@ -111,79 +111,37 @@ thread BinaryTree_16 {
     z = y0;
 }
 "
-// ParallelPrefixTree_16 no executable paths 
+// MatrixMultSimple_ArrLoc_2  
 let mncs5 = "
-nat x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15;
-
-thread ParallelPrefixTree_16 {
-nat y0,y1,y2,y3,y4,y5,y6,y7,y8,y9,y10,y11,y12,y13,y14,y15;
-    y0 = x0;
-    y1 = x1;
-    y2 = x2;
-    y3 = x3;
-    y4 = x4;
-    y5 = x5;
-    y6 = x6;
-    y7 = x7;
-    y8 = x8;
-    y9 = x9;
-    y10 = x10;
-    y11 = x11;
-    y12 = x12;
-    y13 = x13;
-    y14 = x14;
-    y15 = x15;
-    // up-level 0
-    y1 = y0 + y1;
-    y3 = y2 + y3;
-    y5 = y4 + y5;
-    y7 = y6 + y7;
-    y9 = y8 + y9;
-    y11 = y10 + y11;
-    y13 = y12 + y13;
-    y15 = y14 + y15;
-    // up-level 1
-    y3 = y1 + y3;
-    y7 = y5 + y7;
-    y11 = y9 + y11;
-    y15 = y13 + y15;
-    // up-level 2
-    y7 = y3 + y7;
-    y15 = y11 + y15;
-    // up-level 3
-    y15 = y7 + y15;
-    // up-level 4
-    // down-level 5
-    // down-level 6
-    y11 = y7 + y11;
-    // down-level 7
-    y5 = y3 + y5;
-    y9 = y7 + y9;
-    y13 = y11 + y13;
-    // down-level 8
-    y2 = y1 + y2;
-    y4 = y3 + y4;
-    y6 = y5 + y6;
-    y8 = y7 + y8;
-    y10 = y9 + y10;
-    y12 = y11 + y12;
-    y14 = y13 + y14;
-    x0 = y0;
-    x1 = y1;
-    x2 = y2;
-    x3 = y3;
-    x4 = y4;
-    x5 = y5;
-    x6 = y6;
-    x7 = y7;
-    x8 = y8;
-    x9 = y9;
-    x10 = y10;
-    x11 = y11;
-    x12 = y12;
-    x13 = y13;
-    x14 = y14;
-    x15 = y15;
+[2][2]nat a;
+[2][2]nat b;
+[2][2]nat c;
+thread MatrixMult {
+    nat t_1,t_2,t_3,t_4,t_5,t_6,t_7,t_8,t_9,t_10,t_11,t_12,t_13,t_14,t_15,t_16,t_17,t_18,t_19,t_20;
+    t_1 = a[0][0];
+    t_2 = a[0][1];
+    t_3 = a[1][0];
+    t_4 = a[1][1];
+    t_5 = b[0][0];
+    t_6 = b[0][1];
+    t_7 = b[1][0];
+    t_8 = b[1][1];
+    t_9 = t_1 * t_5;
+    t_10 = t_2 * t_7;
+    t_11 = t_9 + t_10;
+    t_12 = t_1 * t_6;
+    t_13 = t_2 * t_8;
+    t_14 = t_12 + t_13;
+    t_15 = t_3 * t_5;
+    t_16 = t_4 * t_7;
+    t_17 = t_15 + t_16;
+    t_18 = t_3 * t_6;
+    t_19 = t_4 * t_8;
+    t_20 = t_18 + t_19;
+    c[0][0] = t_11;
+    c[0][1] = t_14;
+    c[1][0] = t_17;
+    c[1][1] = t_20;
 }
 "
  // FastFourierTransform ArrGlb_8
