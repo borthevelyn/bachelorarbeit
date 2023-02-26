@@ -3,6 +3,11 @@ module Translator.Types
 open Averest.MiniC.Types
 open Averest.MiniC.DataflowProcessNetworks
 
+exception TypeShouldBeArray
+exception InvalidTypeC
+exception CouldNotIdentifyVariableType
+exception CouldNotIdentifyNodeType
+
 /// <summary>
 /// Translates a given TypeC to an OpenCL type. None for those types which can't be translated.
 /// </summary>
@@ -42,7 +47,7 @@ let isArrayBuffer buffer =
 let arraySize arr = 
     match arr.TypeC with
         | Carr (Some count, _) -> count
-        | _ -> raise (System.Exception "The type should be an array")
+        | _ -> raise TypeShouldBeArray
 
 let rec collapseArray typeC =
     match typeC with
@@ -57,7 +62,7 @@ let rec collapseArray typeC =
 
 let constructBuffer typeC name producer =
     match typeCtoStr typeC with
-    | None -> raise (System.Exception "Cannot construct buffer from invalid TypeC")
+    | None -> raise InvalidTypeC
     | Some str ->
         {
             TranslatedType = str
@@ -127,7 +132,7 @@ let rec buildBufferTypeLookup dpn (defs : Map<string, Buffer>) buffers : Map<str
                         buffer
                         (Loader (inA[0], inA[1])))
 
-                | _ -> raise (System.Exception "couldn't identify variable type") 
+                | _ -> raise CouldNotIdentifyVariableType
             | Cint | Cnat -> 
                 match x1.TypeC with
                 | Carr (_, t) -> 
@@ -136,8 +141,8 @@ let rec buildBufferTypeLookup dpn (defs : Map<string, Buffer>) buffers : Map<str
                         (if outA[0] = buffer then x1.TypeC else t)
                         buffer
                         (Loader (inA[1], inA[0])))
-                | _ -> raise (System.Exception "couldn't identify variable type")
-            | _ -> raise (System.Exception "couldn't identify variable type")  
+                | _ -> raise CouldNotIdentifyVariableType
+            | _ -> raise CouldNotIdentifyVariableType 
         | Store _ -> 
             // store node has three inputs: inA[0] = index, inA[1] = name, inA[2] = value
             let newDefs1 = lookupBufferType dpn defs inA[0]
@@ -180,7 +185,8 @@ let rec buildBufferTypeLookup dpn (defs : Map<string, Buffer>) buffers : Map<str
                 buffer 
                 (Storer (arrayName, indexName, valueName)))
 
-        | _ -> raise (System.Exception "couldn't identify node type")
+        | _ -> raise CouldNotIdentifyNodeType
+
 
     let mutable currentDefs = defs
     for buffer in buffers do

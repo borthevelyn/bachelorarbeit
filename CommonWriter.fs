@@ -3,8 +3,10 @@ module Translator.CommonWriter
 open Averest.MiniC.DataflowProcessNetworks
 open Averest.MiniC.Types
 open Types
-open System
 open PathAnalyzer
+
+exception UndefinedNodeInPath
+exception NoExecutablePaths
 
 let tabSpace = "    "
 
@@ -45,7 +47,7 @@ let findExectuablePaths (paths : list<list<int> * PathBuffers>) (calcIn : string
                 // path can be executed
                 executablePaths <- i::executablePaths
                 remainingPaths <- List.removeAt(List.findIndex (fun x-> x = i) remainingPaths) remainingPaths
-        if executablePaths.IsEmpty then raise (System.Exception "no executable paths") 
+        if executablePaths.IsEmpty then raise NoExecutablePaths 
         else
         executablePaths |> List.iter(fun i ->
             let (_, output) = snd paths[i]
@@ -53,6 +55,26 @@ let findExectuablePaths (paths : list<list<int> * PathBuffers>) (calcIn : string
         )
 
         writePaths executablePaths
+
+let generateResultOutput (outVars : string Set) datasize =
+    if outVars.Count = 0 then ""
+    else
+
+    let mutable res = ""
+
+    for pos in { 0 .. datasize - 1 } do
+        res <- res + "printf(\""
+        outVars |> Set.iter (fun x -> res <- res + sprintf "%s: %%i, " x)
+        res <- res[0 ..  res.Length - 3] + "\", "
+
+        let mutable count = 0
+        outVars |> Set.iter (fun x -> 
+            res <- res + (sprintf "outputs[%d], " (pos * outVars.Count + count)) 
+            count <- count + 1
+            )
+        res <- res[0 ..  res.Length - 3] + ");\n"
+
+    res
 
 /// generate one path
 let generateMethodCode dpn (buffers : Map<string, Types.Buffer>) path buffer name : string =
@@ -106,16 +128,23 @@ let generateMethodCode dpn (buffers : Map<string, Types.Buffer>) path buffer nam
 
     let writeStore arrName index value =
         writeBodyInst (sprintf "%s[%s] = %s;" (formatArray arrName) index value)
-    
+
     let writeLoad arrName index var =
-        writeBodyInst (sprintf "%s %s = %s[%s];" buffers[var].TranslatedType var (formatArray arrName) index)
+        if List.contains var output then 
+            writeBodyInst (sprintf "*%s = %s[%s];"  var (formatArray arrName) index)
+        else 
+            writeBodyInst (sprintf "%s %s = %s[%s];" buffers[var].TranslatedType var (formatArray arrName) index)
 
     let writeArrayRename newVar oldArr =
-        writeBodyInst (sprintf "%s %s = %s;" buffers[newVar].TranslatedType newVar (formatArray oldArr))
+        if List.contains newVar output then
+            writeBodyInst (sprintf "*%s = %s;" newVar (formatArray oldArr))
+        else 
+            writeBodyInst (sprintf "%s %s = %s;" buffers[newVar].TranslatedType newVar (formatArray oldArr))
+            
 
-    let writeDeclaration name =
+    let writeInitialization name =
         if not (List.contains name output) then
-            writeBodyInst (buffers[name].TranslatedType + " " + name + ";")
+            writeBodyInst (buffers[name].TranslatedType + " " + name + " = 0;")
 
     for node in path do
         let (outA, dp, inA) = dpn.nodes[node]
@@ -162,13 +191,13 @@ let generateMethodCode dpn (buffers : Map<string, Types.Buffer>) path buffer nam
             writeArrayRename outA[0] inA[1]
 
         | ParITE-> 
-            writeDeclaration outA[0]
+            writeInitialization outA[0]
             code <- sprintf "%s%sif ( %s ) {\n%s" code  tabSpace inA[0] tabSpace
             writeRename outA[0] inA[1]
             code <- code + tabSpace + "} else  { \n" + tabSpace
             writeRename outA[0] inA[2]
             code <- code + tabSpace + "} \n"
-        | _ -> raise (Exception "Undefined node in path")
+        | _ -> raise UndefinedNodeInPath
 
     code <- code + "}\n"
     code

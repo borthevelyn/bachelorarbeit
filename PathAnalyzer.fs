@@ -1,7 +1,8 @@
 module Translator.PathAnalyzer
 
 open Averest.MiniC.DataflowProcessNetworks
-open System
+
+exception UndefindedNodeInPath
 
 let neq x y =
     x <> y
@@ -57,7 +58,7 @@ let traversePathBuffer dpn path writeTo readFrom =
                      readFrom inA[2]
                      writeTo outA[0]
         | _ ->
-            raise (Exception "Undefined node in path")
+            raise UndefindedNodeInPath
 
 /// <summary> 
 /// Relies on the assumption that the path is ordered, returns first the read and written buffers

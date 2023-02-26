@@ -11,6 +11,7 @@
 module Program
 open Translator.Main
 
+// First Example
 let mncs1 = "nat a,b,c; 
 thread t1{ 
     b = a * 2;
@@ -690,6 +691,6 @@ bool t129,t130,t131,t132,t133,t134,t135,t136,t137,t138,t139,t140,t141,t142;
 }
 
 "
-WriteCLCode mncs8
+WriteCLCode mncs10
     
 
