@@ -32,36 +32,38 @@ let calculateArrayVariables dpn mnc =
             |> Map.values
             |> Set.ofSeq))
        
+let rec calculateExecutionOrder (paths : list<int * int list * PathBuffers>) (calc : string Set) = 
+    match paths with
+    | [] -> []
+    | _ -> 
 
-let findExectuablePaths (paths : list<list<int> * PathBuffers>) (calcIn : string Set) writePaths =
-    let mutable calc = calcIn
-    let mutable remainingPaths = 
-        { 0 .. paths.Length - 1 }
-        |> Seq.toList
+    let (calculateNow, calculateLater) =
+        paths
+        |> List.partition (fun (_, _, (inputs, _)) -> inputs |> List.forall calc.Contains)
+    
+    if calculateNow.IsEmpty then raise NoExecutablePaths 
+    else
 
-    while not (remainingPaths.IsEmpty) do
-        let mutable executablePaths = List.Empty
-        for i in remainingPaths do
-            let (input,_) = snd paths[i]
-            if List.forall calc.Contains input then
-                // path can be executed
-                executablePaths <- i::executablePaths
-                remainingPaths <- List.removeAt(List.findIndex (fun x-> x = i) remainingPaths) remainingPaths
-        if executablePaths.IsEmpty then raise NoExecutablePaths 
-        else
-        executablePaths |> List.iter(fun i ->
-            let (_, output) = snd paths[i]
-            calc <- calc |> Set.union (output |> Set.ofList)
-        )
+    let resultNow =
+        calculateNow
+        |> Set.ofList
 
-        writePaths executablePaths
+    let resultRecursed =
+        calculateNow
+        |> List.collect (fun (_, _, (_, outputs)) -> outputs)
+        |> Set.ofList
+        |> Set.union calc
+        |> calculateExecutionOrder calculateLater 
 
+    resultNow::resultRecursed
+        
 let generateResultOutput (outVars : string Set) datasize =
     if outVars.Count = 0 then ""
     else
 
     let mutable res = ""
-
+    res <- res + "if(!onlyTimeOutput) {
+        "
     for pos in { 0 .. datasize - 1 } do
         res <- res + "printf(\""
         outVars |> Set.iter (fun x -> res <- res + sprintf "%s: %%i, " x)
@@ -73,23 +75,12 @@ let generateResultOutput (outVars : string Set) datasize =
             count <- count + 1
             )
         res <- res[0 ..  res.Length - 3] + ");\n"
-
+    res <- res + "}\n"
     res
 
-/// generate one path
-let generateMethodCode dpn (buffers : Map<string, Types.Buffer>) path buffer name : string =
-    let (input, output) = buffer
-
-    // write signature
-    let mutable code = "void " + name + "("
-    input |> 
-    List.filter (fun i -> not (List.contains i output)) |>
-    List.iter (fun x -> code <- code + buffers[x].TranslatedType + " " + x + ", ")
-    output |> 
-    List.iter (fun (x: string) -> code <- sprintf "%s%s* %s, " code buffers[x].TranslatedType x)
-    code <- code[0 .. code.Length - 3] + ") { \n"
-
+let generateMethodBodyCode dpn (buffers : Map<string, Types.Buffer>) path input output =
     let ioValues = input |> List.filter (fun i -> List.contains i output)
+    let mutable res = ""
 
     let formatArray name =
         if List.contains name ioValues then
@@ -112,7 +103,7 @@ let generateMethodCode dpn (buffers : Map<string, Types.Buffer>) path buffer nam
         
 
     let writeBodyInst str =
-        code <- code + tabSpace + str + "\n"
+        res <- res + tabSpace + str + "\n"
 
     let writeRename varName value = 
         if varName = value then
@@ -192,12 +183,59 @@ let generateMethodCode dpn (buffers : Map<string, Types.Buffer>) path buffer nam
 
         | ParITE-> 
             writeInitialization outA[0]
-            code <- sprintf "%s%sif ( %s ) {\n%s" code  tabSpace inA[0] tabSpace
+            res <- sprintf "%s%sif ( %s ) {\n%s" res  tabSpace inA[0] tabSpace
             writeRename outA[0] inA[1]
-            code <- code + tabSpace + "} else  { \n" + tabSpace
+            res <- res + tabSpace + "} else  { \n" + tabSpace
             writeRename outA[0] inA[2]
-            code <- code + tabSpace + "} \n"
+            res <- res + tabSpace + "} \n"
         | _ -> raise UndefinedNodeInPath
 
+    res
+
+/// generate one path
+let generateMethodCode dpn (buffers : Map<string, Types.Buffer>) path buffer name : string =
+    let (input, output) = buffer
+
+    // write signature
+    let mutable code = "void " + name + "("
+    input |> 
+    List.filter (fun i -> not (List.contains i output)) |>
+    List.iter (fun x -> code <- code + buffers[x].TranslatedType + " " + x + ", ")
+    output |> 
+    List.iter (fun (x: string) -> code <- sprintf "%s%s* %s, " code buffers[x].TranslatedType x)
+    code <- code[0 .. code.Length - 3] + ") { \n"
+
+    code <- code + generateMethodBodyCode dpn buffers path input output
     code <- code + "}\n"
     code
+
+let writeIncludes = "
+#include <chrono>
+#include <iostream>
+#include <string>
+
+using namespace std;
+
+"
+let writeMain = "
+int main(int argc, char** argv)
+{
+    bool onlyTimeOutput = [&]() {
+        if (argc < 2) return false;
+
+        if (std::string(argv[1]) == \"--onlytime\")
+            return true;
+        else
+            return false;
+    }();
+
+"
+let startTiming = tabSpace + "auto start = chrono::steady_clock::now();\n"
+let endTiming = tabSpace + "auto end = chrono::steady_clock::now();\n"
+let writeTime = "
+    if (!onlyTimeOutput)
+        printf(\"time: %lld ms\", chrono::duration_cast<chrono::milliseconds>(end - start).count());
+    else
+        printf(\"%lld\", chrono::duration_cast<chrono::nanoseconds>(end - start).count());
+
+"

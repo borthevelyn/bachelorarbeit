@@ -4,9 +4,11 @@ open Translator.Types
 open Translator.PathAnalyzer
 open Translator.CLWriter
 open Translator.OpenMPWriter
+open Translator.SingleThreadWriter
 open Averest.MiniC.IO
 open Averest.MiniC.Types
 open Averest.MiniC.DataflowProcessNetworks
+open CommonWriter
 
 let WriteCLCode mncs =
     // generate program and dpn
@@ -44,40 +46,78 @@ let WriteCLCode mncs =
     let deadlocks : Set<PathDeadlock> = 
         calculateDeadlocks pathDependencies
 
-    let resolvedPaths = resolveDeadlocksPathJoin nodeLevels pathsList deadlocks
+    let resolvedPaths = 
+        resolveDeadlocksPathJoin nodeLevels pathsList deadlocks
+        |> Set.toList
 
-    let resolvedPathBuffers =
+    let namedOneNodePaths = 
+        seq { 0 .. dpn.nodes.Length - 1 }
+        |> List.ofSeq
+        |> List.map(fun x -> 
+            let (outA, _, inA) = dpn.nodes[x]     
+            x, [x], (PathBuffers) (List.ofArray inA, List.ofArray outA))
+    
+    let namedResolvedPaths =
         resolvedPaths
-        |> Set.map (fun x -> (x, snd (calculatePathBuffers dpn x)))
+        |> List.map (fun x -> (x, snd (calculatePathBuffers dpn x)))
+        |> List.mapi (fun i (path, pb) -> i, path, pb)
     
-    let oneNodePaths = 
-         seq { 0 .. dpn.nodes.Length-1 }
-        |> Set.ofSeq
-        |> Set.map(fun x -> let (outA, _ , inA) = dpn.nodes[x]     
-                            ([x], (PathBuffers) (List.ofArray inA, List.ofArray outA)))
-    
-    
-    System.IO.File.WriteAllText("test1.cpp", generateOpenMPCode dpn varTypes oneNodePaths mncPrg)
-    System.IO.File.WriteAllText("test2.cpp", generateOpenMPCode dpn varTypes resolvedPathBuffers mncPrg)
+    let inputs = calculateKnownVariables dpn mncPrg
 
-    let minPathLength (path:Set<list<int> * PathBuffers>) = 
+    let orderedNodePaths = calculateExecutionOrder namedOneNodePaths inputs
+    let orderedResolvedPaths = calculateExecutionOrder namedResolvedPaths inputs
+    
+
+
+    //System.IO.File.WriteAllText("test.cpp", generateSingleThreadCode dpn varTypes orderedNodePaths mncPrg)
+    //System.IO.File.WriteAllText("OpenMP_MatrixMultSimple_1.cpp", generateOpenMPCode dpn varTypes orderedNodePaths mncPrg)
+    //System.IO.File.WriteAllText("OpenMP_MatrixMultSimple_2.cpp", generateOpenMPCode dpn varTypes orderedResolvedPaths mncPrg)
+    System.IO.File.WriteAllText("OpenCL_MatrixMultSimple_1.cpp", generateCLCode dpn varTypes orderedNodePaths mncPrg)
+    //System.IO.File.WriteAllText("OpenCL_MatrixMultSimple_2.cpp", generateCLCode dpn varTypes orderedResolvedPaths mncPrg)
+
+    let minPathLength (path: list<int * list<int> * PathBuffers>) = 
         path
-        |> Set.map(fun x -> let a,_ = x
-                            a.Length)
-        |> Set.minElement
+        |> List.map (fun x -> 
+            let _, a, _ = x
+            a.Length)
+        |> List.min
 
-    let maxPathLength (path:Set<list<int> * PathBuffers>) = 
+    let maxPathLength (path: list<int * list<int> * PathBuffers>) = 
         path
-        |> Set.map(fun x -> let a,_ = x
-                            a.Length)
-        |> Set.maxElement
+        |> List.map (fun x -> 
+            let _, a, _ = x
+            a.Length)
+        |> List.max
+        
 
+    let avgPathLength (path: list<int * list<int> * PathBuffers>) = 
+        path
+        |> List.map (fun x -> 
+            let _, a, _ = x
+            float a.Length)
+        |> List.average
+        |> string
     
-    printfn "%s" ("              |".PadLeft(22) +  "Variante 1".PadLeft(10) + "|".PadRight(2) + "Variante 2 " + "\n" +
-                       "Threads:            " + "|".PadLeft(2)+ oneNodePaths.Count.ToString().PadRight(10) + "|".PadRight(2) + resolvedPathBuffers.Count.ToString() + "\n" +
-                       "Knotenanzahl:       " + "|".PadLeft(2) + dpn.nodes.Length.ToString().PadRight(10)  + "|".PadRight(2) + dpn.nodes.Length.ToString() + "\n" +
-                       "Minimale Pfadlänge: " + "|".PadLeft(2) + (minPathLength oneNodePaths).ToString().PadRight(10) + "|".PadRight(2) + (minPathLength resolvedPathBuffers).ToString() + "\n" +
-                       "Maximale Pfadlänge: " + "|".PadLeft(2) + (maxPathLength oneNodePaths).ToString().PadRight(10) + "|".PadRight(2) + (maxPathLength resolvedPathBuffers).ToString() )
+    let maxExecutablePaths1 = 
+        orderedNodePaths
+        |> List.maxBy Set.count
+        |> Set.count
+        |> string
+
+    let maxExecutablePaths2 =
+        orderedResolvedPaths
+        |> List.maxBy Set.count
+        |> Set.count
+        |> string
+    
+       
+    printfn "%s" ("              |".PadLeft(35) +  "Variante 1".PadLeft(10) + "|".PadRight(2) + "Variante 2 " + "\n" +
+                       "Threads:            " + "|".PadLeft(15)+ (string namedOneNodePaths.Length).PadRight(10) + "|".PadRight(2) + string namedResolvedPaths.Length + "\n" +
+                       "Knotenanzahl:       " + "|".PadLeft(15) + (string dpn.nodes.Length).PadRight(10)  + "|".PadRight(2) + dpn.nodes.Length.ToString() + "\n" +
+                       "Minimale Pfadlänge: " + "|".PadLeft(15) + (string (minPathLength namedOneNodePaths)).PadRight(10) + "|".PadRight(2) + string (minPathLength namedResolvedPaths) + "\n" +
+                       "Maximale Pfadlänge: " + "|".PadLeft(15) + (string (maxPathLength namedOneNodePaths)).PadRight(10) + "|".PadRight(2) + string (maxPathLength namedResolvedPaths) + "\n" + 
+                       "Durchschnittliche Pfadlänge: " + "|".PadLeft(6) + (avgPathLength namedOneNodePaths).PadRight(10) + "|".PadRight(2) + avgPathLength namedResolvedPaths + "\n" +
+                       "Maximale Thread Parallelisierung:"+ "|".PadLeft(2) + (maxExecutablePaths1).PadRight(10) + "|".PadRight(2) + (maxExecutablePaths2) + "\n")
    
 
         

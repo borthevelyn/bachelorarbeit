@@ -58,6 +58,12 @@ let rec collapseArray typeC =
         | _ -> typeC
     | _ -> typeC
 
+let rec arrayBaseType a =
+    match a with
+    | Carr (_, inner) ->
+        arrayBaseType inner
+    | _ -> a
+
 
 
 let constructBuffer typeC name producer =

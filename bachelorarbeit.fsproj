@@ -9,6 +9,7 @@
     <Compile Include="Types.fs"/>
     <Compile Include="PathAnalyzer.fs"/>
     <Compile Include="CommonWriter.fs"/>
+    <Compile Include="SingleThreadWriter.fs"/>
     <Compile Include="CLWriter.fs"/>
     <Compile Include="OpenMPWriter.fs"/>
     <Compile Include="Translator.fs"/>

@@ -13,7 +13,20 @@ let tabSpace3 = "           "
 let tabSpace4 = "               "
 
 let generateHeader datasize = 
-    sprintf "#if 0 \n#include<stdio.h>\n#include<omp.h>\n#include<chrono>\n#include <iostream>\n#define DATA_SIZE %d\n\nusing namespace std;\n\n" datasize
+    sprintf "
+#if 0 
+#include<stdio.h>
+#include<omp.h>
+#include<chrono>
+#include <iostream>
+#include <string>
+#define DATA_SIZE %d
+
+using namespace std;
+
+"       
+        datasize
+
     
 let generateInputVariableInitialization dpnInVars (buffers : Map<string, Types.Buffer>) =
     let mutable count = 0
@@ -25,7 +38,7 @@ let generateInputVariableInitialization dpnInVars (buffers : Map<string, Types.B
     )
     res
 
-let generatePathCode dpn buffers pathsAndBuffers = 
+let generatePathCode dpn buffers (pathsAndBuffers: Set<int list * PathBuffers>) = 
     let mutable count = 0
     let mutable res = ""
     for pathBuffer in pathsAndBuffers do
@@ -43,28 +56,30 @@ let generateArrayDeclaration name typeC =
         | None -> raise CannotPrintRequiredArray
     | _ -> raise CannotPrintRequiredArray
 
-let generateBody dpn (buffers : Map<string, Buffer>) (paths : list<list<int> * PathBuffers>) inputData mnc =
+/// Generates the body of the file. Buffers is a mapping of buffer names from the dpn
+/// Paths is a list with each entry containg the required information of a set of paths. 
+/// Those paths in the same set may be executed in parallel.
+/// The paths should be called in the order of the list.
+let generateBody dpn (buffers : Map<string, Buffer>) (pathsCollection : list<Set<int * PathBuffers>>) inputData mnc =
     let mutable count = 0
     let mutable res = ""
     let writeCode str = res <- res + str
 
+    // the list of arrays used in this calculation
+    let dpnArrays = calculateArrayVariables dpn mnc
+    
     let writeCallPath path tabSpace =
-        let (input, output) = snd paths[path];
-        writeCode (sprintf "%spath%d(" tabSpace path)
+        let (input, output) = snd path;
+        writeCode (sprintf "%spath%d(" tabSpace (fst path))
         let ioArrays = input |> List.filter (fun x -> output |> List.contains x)
-        input |> List.iter (fun x -> 
+        input |> List.iter (fun x ->
                 if not (ioArrays |> List.contains x) then
                     writeCode (sprintf "%s, " x))
         output |> List.iter (fun x -> writeCode (sprintf "&%s, " x))
         res <- res[0 ..  res.Length - 3] + ");\n"
 
-    // the list of already calculated variables - we can start with some initially known variables
-    let mutable calc = calculateKnownVariables dpn mnc
-    
-    // the list of arrays used in this calculation
-    let dpnArrays = calculateArrayVariables dpn mnc
-
-    writeCode (sprintf "void main() { \n%sint inputs[] = { %s }; \n" tabSpace inputData)
+    writeCode (writeMain)
+    writeCode (sprintf "\n%sint inputs[] = { %s }; \n" tabSpace inputData)
 
     if dpn.outVars.Count > 0 then
         writeCode (sprintf "%sint outputs[DATA_SIZE * %d];\n" tabSpace dpn.outVars.Count)
@@ -72,36 +87,42 @@ let generateBody dpn (buffers : Map<string, Buffer>) (paths : list<list<int> * P
     for arr in dpnArrays do
         writeCode (generateArrayDeclaration arr.Name arr.TypeC)
     
-    writeCode "auto start = chrono::steady_clock::now();\n"
+    writeCode startTiming
     writeCode (sprintf "%s#pragma omp parallel for \n%sfor (int i = 0; i < DATA_SIZE; i++) {\n" tabSpace tabSpace)
 
     writeCode (generateInputVariableInitialization dpn.inVars buffers)
     
-    {0 .. paths.Length - 1} |> Seq.iter (fun i ->
-        let (input, output) = snd paths[i]
-        output |> 
-        List.iter(fun x -> 
-            if dpn.inVars |> Set.contains x then 
-                ()
-            elif isArrayBuffer buffers[x] && Set.exists (fun arr -> arr.Name = x) dpnArrays then 
-                writeCode (sprintf "%s%s %s = %s_arr + i * %d;\n" tabSpace2 buffers[x].TranslatedType x x (arraySize buffers[x]))
-            else
-                writeCode (sprintf "%s%s %s;\n" tabSpace2 buffers[x].TranslatedType x))
-    )
+    // declare variables shared between paths.
+    // this is done by handling each output of each path - since every buffer is read only, this will only happen once
+    // for each variable    
+    pathsCollection
+    |> List.collect Set.toList
+    |> List.iter
+        (fun (_, (_, output)) ->
+            output |> 
+            List.iter(fun x -> 
+                if dpn.inVars |> Set.contains x then 
+                    ()
+                elif isArrayBuffer buffers[x] && Set.exists (fun arr -> arr.Name = x) dpnArrays then 
+                    // because arrays are generally shared between executions, calculate an offset
+                    writeCode (sprintf "%s%s %s = %s_arr + i * %d;\n" tabSpace2 buffers[x].TranslatedType x x (arraySize buffers[x]))
+                else
+                    writeCode (sprintf "%s%s %s;\n" tabSpace2 buffers[x].TranslatedType x))
+        )
+
     writeCode "\n"
 
-    findExectuablePaths paths calc (fun executablePaths ->        
-        if executablePaths.Length = 1 then
-            writeCallPath executablePaths[0] tabSpace2 
+    // call each path
+    for paths in pathsCollection do
+        if paths.Count = 1 then
+            writeCallPath paths.MaximumElement tabSpace2 
         else 
-            writeCode(sprintf "%s#pragma omp parallel sections\n%s{\n" tabSpace2 tabSpace2)
-            executablePaths |> List.iter(fun i ->
+            writeCode (sprintf "%s#pragma omp parallel sections\n%s{\n" tabSpace2 tabSpace2)
+            for path in paths do
                 writeCode(sprintf "%s#pragma omp section\n" tabSpace3)
-                writeCallPath i tabSpace4
-            )
+                writeCallPath path tabSpace4
+            
             writeCode(sprintf "%s}\n" tabSpace2)
-    )
-
 
     writeCode "\n"
     count <- 0
@@ -111,7 +132,8 @@ let generateBody dpn (buffers : Map<string, Buffer>) (paths : list<list<int> * P
         )
     writeCode (sprintf "%s}\n" tabSpace)
 
-    writeCode "auto end = chrono::steady_clock::now();\nprintf(\"time: %lld ms\", chrono::duration_cast<chrono::milliseconds>(end - start).count());\n"
+    writeCode endTiming 
+    writeCode writeTime
 
     res
 
@@ -126,7 +148,7 @@ let generateArrayOutput dpn mnc =
         | _ -> ()
     res
 
-let generateOpenMPCode dpn (buffers : Map<string, Buffer>) (pathsAndBuffers : Set<(int list) * PathBuffers>) (mnc:MiniCProgram) : string =
+let generateOpenMPCode dpn (buffers : Map<string, Buffer>) (orderedPaths : list<Set<int * list<int> * PathBuffers>>) (mnc:MiniCProgram) =
     
     let mutable code = ""
 
@@ -138,12 +160,23 @@ let generateOpenMPCode dpn (buffers : Map<string, Buffer>) (pathsAndBuffers : Se
     printfn "Enter input:"
     let inputData = System.Console.ReadLine()
 
-    let paths = pathsAndBuffers |> Set.toList
-     
+    let pathBuffers: Set<list<int> * PathBuffers> = 
+        orderedPaths
+        |> List.map(fun x -> (x |> Set.map (fun (_ , path , buffer) -> path, buffer)))
+        |> List.collect Set.toList
+        |> Set.ofList
+
+    let idBuffers: list<Set<int * PathBuffers>> = 
+        orderedPaths
+        |> List.map(fun x -> (x |> Set.map (fun (id, _, buffer) -> id, buffer)))
+
     writeCode (generateHeader datasize)
-    writeCode (generatePathCode dpn buffers paths)
-    writeCode (generateBody dpn buffers paths inputData mnc)
+    writeCode (generatePathCode dpn buffers pathBuffers)
+    let str = generateBody dpn buffers idBuffers inputData mnc 
+    writeCode str
+    writeCode (tabSpace + "if (!onlyTimeOutput) {")
     writeCode (generateResultOutput dpn.outVars datasize)
     writeCode (generateArrayOutput dpn mnc) 
+    writeCode (tabSpace + "}")
     code + "\n}\n#endif"
     
