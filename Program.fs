@@ -1,26 +1,25 @@
-﻿// -----------------------------------------------------------------------------
-// load the Averest dll from nuget.org and open some modules
-// -----------------------------------------------------------------------------
-// see https://es.cs.uni-kl.de/tools/Averest/AverestLibDoc/reference
-// for a documentation of the library functions
-// -----------------------------------------------------------------------------
-#if INTERACTIVE
-#r "nuget: Averest, 3.0.1";; 
-#endif
-
+﻿// These regex strings are used for generated dot files for dpns to show the buffer names as labels and can be ignored.
+// Search regex: (.+) -> (.+) \[label=""(,style="(.+)")?,color="([a-zA-Z]+)"(,arrowhead="(.+)")?\]; \/\/ (.+)
+// Replace string: $1 -> $2 [label="$8",color="$5"]; // $8
 module Program
+
 open Translator.Main
 
 // First Example
-let mncs1 = "nat a,b,c; 
+let mncs1 =
+    "
+nat a,b,c; 
 thread t1{ 
     b = a * 2;
     c = a + b; 
 }"
-// Transitive Hull
-let mncs2 = "bool m_0_0,m_0_1,m_1_0,m_1_1;
- bool t_0_0,t_0_1,t_1_0,t_1_1;
- thread TransHull {
+// Ten benchmarks used for evaluation in my thesis
+// http://www.averest.org/examples/MiniC/UnrolledPRAM/TransHull_SclLoc_2.html
+let mncs2 =
+    "
+bool m_0_0,m_0_1,m_1_0,m_1_1;
+bool t_0_0,t_0_1,t_1_0,t_1_1;
+thread TransHull {
     bool t_1,t_2,t_3,t_4;
     t_1 = m_0_0;
     t_2 = m_0_1;
@@ -39,14 +38,15 @@ let mncs2 = "bool m_0_0,m_0_1,m_1_0,m_1_1;
     t_1_0 = t_3;
     t_1_1 = t_4;
 }"
-// BitonicSort 4
-let mncs3 = "
+//http://www.averest.org/examples/MiniC/UnrolledPRAM/BitonicSort_4.html
+let mncs3 =
+    "
 nat x_0_0,x_1_0,x_2_0,x_3_0;
 nat x_0_3,x_1_3,x_2_3,x_3_3;
 thread BitonicSort_4 {
     bool c_0_1_0,c_0_1_2,c_0_3_1,c_1_2_1,c_2_3_0,c_3_2_2;
-nat x_0_1,x_1_1,x_2_1,x_3_1;
-nat x_0_2,x_1_2,x_2_2,x_3_2;
+    nat x_0_1,x_1_1,x_2_1,x_3_1;
+    nat x_0_2,x_1_2,x_2_2,x_3_2;
     c_0_1_0 = x_0_0<x_1_0;
     x_0_1 = (c_0_1_0?x_0_0:x_1_0);
     x_1_1 = (c_0_1_0?x_1_0:x_0_0);
@@ -67,8 +67,9 @@ nat x_0_2,x_1_2,x_2_2,x_3_2;
     x_2_3 = (c_3_2_2?x_2_2:x_3_2);
 }
 "
-// BinaryTree Arr_16
-let mncs4 = "
+// http://www.averest.org/examples/MiniC/UnrolledPRAM/BinaryTree_Arr_16.html
+let mncs4 =
+    "
 [16]nat x;
 nat z;
 
@@ -112,8 +113,9 @@ thread BinaryTree_16 {
     z = y0;
 }
 "
-// MatrixMultSimple_ArrLoc_2  
-let mncs5 = "
+// http://www.averest.org/examples/MiniC/UnrolledPRAM/MatrixMultSimple_ArrLoc_2.html
+let mncs5 =
+    "
 [2][2]nat a;
 [2][2]nat b;
 [2][2]nat c;
@@ -145,8 +147,9 @@ thread MatrixMult {
     c[1][1] = t_20;
 }
 "
- // FastFourierTransform ArrGlb_8
-let mncs6 = "
+// http://www.averest.org/examples/MiniC/UnrolledPRAM/FastFourierTransform_ArrGlb_8.html
+let mncs6 =
+    "
 [8]int w;
 [8]int x;
 [8]int y;
@@ -187,8 +190,9 @@ thread FastFourierTransform {
 }
 
 "
- //FastFourierTransform SclGlb_8
-let mncs7 = "
+// http://www.averest.org/examples/MiniC/UnrolledPRAM/FastFourierTransform_SclGlb_8.html
+let mncs7 =
+    "
 int w_0,w_1,w_2,w_3,w_4,w_5,w_6,w_7;
 int x_0,x_1,x_2,x_3,x_4,x_5,x_6,x_7;
 int y_0,y_1,y_2,y_3,y_4,y_5,y_6,y_7;
@@ -228,8 +232,9 @@ thread FastFourierTransform {
     y_7 = t_24;
 }
 "
- // MatrixMultCannon_SclGlb_4
-let mncs8 = "
+// http://www.averest.org/examples/MiniC/UnrolledPRAM/MatrixMultCannon_SclGlb_4.html
+let mncs8 =
+    "
 nat a_0_0,a_0_1,a_0_2,a_0_3,a_1_0,a_1_1,a_1_2,a_1_3,a_2_0,a_2_1,a_2_2,a_2_3,a_3_0,a_3_1,a_3_2,a_3_3;
 nat b_0_0,b_0_1,b_0_2,b_0_3,b_1_0,b_1_1,b_1_2,b_1_3,b_2_0,b_2_1,b_2_2,b_2_3,b_3_0,b_3_1,b_3_2,b_3_3;
 nat c_0_0,c_0_1,c_0_2,c_0_3,c_1_0,c_1_1,c_1_2,c_1_3,c_2_0,c_2_1,c_2_2,c_2_3,c_3_0,c_3_1,c_3_2,c_3_3;
@@ -444,8 +449,9 @@ thread MatrixMultCannon {
     c_3_3 = c_3_3;
 }
 "
-//RadixBAddCarryLookahead4
-let mncs9 = "
+//http://www.averest.org/examples/MiniC/UnrolledPRAM/RadixBAddCarryLookahead_ArrGlb_4.html
+let mncs9 =
+    "
 [4]nat x;
 [4]nat y;
 [5]nat s;
@@ -489,8 +495,9 @@ thread RadixBAddCarryLookahead4 {
     s[4] = (g[3]?1:0);
 }
 "
-// RadixBMulDadda ArrLoc4
-let mncs10 = "
+//http://www.averest.org/examples/MiniC/UnrolledPRAM/RadixBMulDadda_ArrLoc_4.html
+let mncs10 =
+    "
 [4]nat x;
 [4]nat y;
 [8]nat p;
@@ -689,8 +696,107 @@ bool t129,t130,t131,t132,t133,t134,t135,t136,t137,t138,t139,t140,t141,t142;
     p[6] = t127 % 256;
     p[7] = t128 % 256;
 }
+"
+
+// Examples described in my bachelor thesis
+// Simple example
+let mncs11 =     
+    "
+nat a,b,c; 
+thread t1 {  
+    b = a * 2;
+    c = a * 3 + b;        
+}  
+"
+
+// Complex examples
+//http://www.averest.org/examples/MiniC/UnrolledPRAM/MatrixMultCannon_SclGlb_2.html
+let mncs12 =     
+    "
+
+nat a_0_0,a_0_1,a_1_0,a_1_1;
+nat b_0_0,b_0_1,b_1_0,b_1_1;
+nat c_0_0,c_0_1,c_1_0,c_1_1;
+thread MatrixMultCannon {
+    b_0_0 = b_1_0;
+    a_0_0 = a_0_1;
+    c_0_0 = c_0_0 + a_0_0 * b_0_0;
+    b_0_0 = b_1_0;
+    a_0_0 = a_0_1;
+    c_0_0 = c_0_0 + a_0_0 * b_0_0;
+    b_0_1 = b_1_1;
+    a_0_1 = a_0_0;
+    c_0_1 = c_0_1 + a_0_1 * b_0_1;
+    b_0_1 = b_1_1;
+    a_0_1 = a_0_0;
+    c_0_1 = c_0_1 + a_0_1 * b_0_1;
+    b_1_0 = b_0_0;
+    a_1_0 = a_1_1;
+    c_1_0 = c_1_0 + a_1_0 * b_1_0;
+    b_1_0 = b_0_0;
+    a_1_0 = a_1_1;
+    c_1_0 = c_1_0 + a_1_0 * b_1_0;
+    b_1_1 = b_0_1;
+    a_1_1 = a_1_0;
+    c_1_1 = c_1_1 + a_1_1 * b_1_1;
+    b_1_1 = b_0_1;
+    a_1_1 = a_1_0;
+    c_1_1 = c_1_1 + a_1_1 * b_1_1;
+    c_0_0 = c_0_0;
+    c_0_1 = c_0_1;
+    c_1_0 = c_1_0;
+    c_1_1 = c_1_1;
+}
 
 "
-WriteCLCode mncs10
-    
 
+//http://www.averest.org/examples/MiniC/UnrolledPRAM/MatrixMultCannon_ArrGlb_2.html
+let mncs13 = "
+[2][2]nat a;
+[2][2]nat b;
+[2][2]nat c;
+thread MatrixMultCannonArr2 {
+    nat t_1,t_2,t_3,t_4,t_5,t_6,t_7,t_8,t_9,t_10,t_11,t_12;
+    t_1 = a[0][0];
+    t_2 = a[0][1];
+    t_3 = a[1][1];
+    t_4 = a[1][0];
+    t_5 = b[0][0];
+    t_6 = b[1][1];
+    t_7 = b[1][0];
+    t_8 = b[0][1];
+    t_5 = t_7;
+    t_1 = t_2;
+    t_9 = t_9 + t_1 * t_5;
+    t_5 = t_7;
+    t_1 = t_2;
+    t_9 = t_9 + t_1 * t_5;
+    t_6 = t_8;
+    t_2 = t_1;
+    t_10 = t_10 + t_2 * t_6;
+    t_6 = t_8;
+    t_2 = t_1;
+    t_10 = t_10 + t_2 * t_6;
+    t_7 = t_5;
+    t_3 = t_4;
+    t_11 = t_11 + t_3 * t_7;
+    t_7 = t_5;
+    t_3 = t_4;
+    t_11 = t_11 + t_3 * t_7;
+    t_8 = t_6;
+    t_4 = t_3;
+    t_12 = t_12 + t_4 * t_8;
+    t_8 = t_6;
+    t_4 = t_3;
+    t_12 = t_12 + t_4 * t_8;
+    c[0][0] = t_9;
+    c[0][1] = t_10;
+    c[1][0] = t_11;
+    c[1][1] = t_12;
+}"
+
+// the following line may be uncommented to produce output for any single program
+//WriteCode mncs13 "Mult" |> ignore
+
+// the following line produces code for all programs in the MiniCPrograms folder
+mncPrgToCppPrg ()

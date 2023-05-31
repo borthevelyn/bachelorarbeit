@@ -7,27 +7,19 @@ open Types
 
 exception CannotPrintRequiredArray
 
-let tabSpace = "    "
-let tabSpace2 = "       "
-let tabSpace3 = "           "
-let tabSpace4 = "               "
-
-let generateHeader datasize = 
-    sprintf "
-#if 0 
-#include<stdio.h>
-#include<omp.h>
-#include<chrono>
+let generateHeader = 
+    sprintf "#include <stdio.h>
+#include <omp.h>
+#include <chrono>
 #include <iostream>
 #include <string>
-#define DATA_SIZE %d
+#include <cstring>
+#define DATA_SIZE 1
 
 using namespace std;
 
 "       
-        datasize
-
-    
+         
 let generateInputVariableInitialization dpnInVars (buffers : Map<string, Types.Buffer>) =
     let mutable count = 0
     let mutable res = ""
@@ -38,13 +30,11 @@ let generateInputVariableInitialization dpnInVars (buffers : Map<string, Types.B
     )
     res
 
-let generatePathCode dpn buffers (pathsAndBuffers: Set<int list * PathBuffers>) = 
-    let mutable count = 0
+let generatePathCode dpn buffers (pathsAndBuffers: Set<int * int list * PathBuffers>) = 
     let mutable res = ""
     for pathBuffer in pathsAndBuffers do
-        let (path, buffer) = pathBuffer
-        res <- res + (generateMethodCode dpn buffers path buffer ("path" + (string count)))
-        count <- count + 1
+        let (id, path, buffer) = pathBuffer
+        res <- res + (generateFunctionCode dpn buffers path buffer ("path" + (string id)))
 
     res
 
@@ -52,7 +42,7 @@ let generateArrayDeclaration name typeC =
     match typeC with
     | Carr (Some count, t) ->
         match typeCtoStr t with
-        | Some str -> sprintf "%s%s %s_arr[%d * DATA_SIZE] = { 0 };\n" tabSpace str name count
+        | Some str -> sprintf "%s%s* %s_arr = new %s[%d * DATA_SIZE];\n" tabSpace str name str count
         | None -> raise CannotPrintRequiredArray
     | _ -> raise CannotPrintRequiredArray
 
@@ -60,7 +50,7 @@ let generateArrayDeclaration name typeC =
 /// Paths is a list with each entry containg the required information of a set of paths. 
 /// Those paths in the same set may be executed in parallel.
 /// The paths should be called in the order of the list.
-let generateBody dpn (buffers : Map<string, Buffer>) (pathsCollection : list<Set<int * PathBuffers>>) inputData mnc =
+let generateBody dpn (buffers : Map<string, Buffer>) (pathsCollection : list<Set<int * PathBuffers>>) parallelizePath mnc =
     let mutable count = 0
     let mutable res = ""
     let writeCode str = res <- res + str
@@ -71,18 +61,21 @@ let generateBody dpn (buffers : Map<string, Buffer>) (pathsCollection : list<Set
     let writeCallPath path tabSpace =
         let (input, output) = snd path;
         writeCode (sprintf "%spath%d(" tabSpace (fst path))
-        let ioArrays = input |> List.filter (fun x -> output |> List.contains x)
-        input |> List.iter (fun x ->
-                if not (ioArrays |> List.contains x) then
-                    writeCode (sprintf "%s, " x))
+        input 
+        |> List.filter (fun x -> not (output |> List.contains x))
+        |> List.iter (fun x -> writeCode (sprintf "%s, " x))
         output |> List.iter (fun x -> writeCode (sprintf "&%s, " x))
         res <- res[0 ..  res.Length - 3] + ");\n"
 
     writeCode (writeMain)
-    writeCode (sprintf "\n%sint inputs[] = { %s }; \n" tabSpace inputData)
+    if not (dpn.inVars.IsEmpty) then 
+        let inputType = buffers[dpn.inVars.MinimumElement].TranslatedType
+        writeCode (sprintf "\n%s%s* inputs = new %s[DATA_SIZE * %d ]; \n" tabSpace inputType inputType dpn.inVars.Count)
+        writeCode (sprintf "%smemset(inputs, 0, %d * DATA_SIZE * sizeof(%s));" tabSpace dpn.inVars.Count inputType)
 
     if dpn.outVars.Count > 0 then
-        writeCode (sprintf "%sint outputs[DATA_SIZE * %d];\n" tabSpace dpn.outVars.Count)
+        let outputType = buffers[dpn.outVars.MinimumElement].TranslatedType
+        writeCode (sprintf "\n%s%s* outputs = new %s[DATA_SIZE * %d ]; \n" tabSpace outputType outputType dpn.outVars.Count)
     
     for arr in dpnArrays do
         writeCode (generateArrayDeclaration arr.Name arr.TypeC)
@@ -100,7 +93,7 @@ let generateBody dpn (buffers : Map<string, Buffer>) (pathsCollection : list<Set
     |> List.iter
         (fun (_, (_, output)) ->
             output |> 
-            List.iter(fun x -> 
+            List.iter (fun x -> 
                 if dpn.inVars |> Set.contains x then 
                     ()
                 elif isArrayBuffer buffers[x] && Set.exists (fun arr -> arr.Name = x) dpnArrays then 
@@ -117,12 +110,17 @@ let generateBody dpn (buffers : Map<string, Buffer>) (pathsCollection : list<Set
         if paths.Count = 1 then
             writeCallPath paths.MaximumElement tabSpace2 
         else 
-            writeCode (sprintf "%s#pragma omp parallel sections\n%s{\n" tabSpace2 tabSpace2)
+            if parallelizePath then
+                writeCode (sprintf "%s#pragma omp parallel sections\n%s{\n" tabSpace2 tabSpace2)
+
             for path in paths do
-                writeCode(sprintf "%s#pragma omp section\n" tabSpace3)
+                if parallelizePath then
+                    writeCode(sprintf "%s#pragma omp section\n" tabSpace3)
+
                 writeCallPath path tabSpace4
             
-            writeCode(sprintf "%s}\n" tabSpace2)
+            if parallelizePath then
+                writeCode(sprintf "%s}\n" tabSpace2)
 
     writeCode "\n"
     count <- 0
@@ -143,40 +141,34 @@ let generateArrayOutput dpn mnc =
     for arr in dpnArrays do
         match arr.TypeC with
         | Carr (Some count, _) ->
-            res <- res + sprintf "%scout << \"\\n%s: \";\n" tabSpace arr.Name
-            res <- res + sprintf "%sfor(int i = 0; i < %d * DATA_SIZE; i++) {\n%scout << %s_arr[i] << \" \";\n%s}\n" tabSpace count tabSpace2 arr.Name tabSpace
+            res <- res + sprintf "%scout << \"\\n%s: \";\n" tabSpace2 arr.Name
+            res <- res + sprintf "%sfor(int i = 0; i < %d * DATA_SIZE; i++) {\n%scout << %s_arr[i] << \" \";\n%s}\n" tabSpace2 count tabSpace3 arr.Name tabSpace2
         | _ -> ()
     res
 
-let generateOpenMPCode dpn (buffers : Map<string, Buffer>) (orderedPaths : list<Set<int * list<int> * PathBuffers>>) (mnc:MiniCProgram) =
+let generateOpenMPCode dpn (buffers : Map<string, Buffer>) (orderedPaths : list<Set<int * list<int> * PathBuffers>>) parallelizePath (mnc:MiniCProgram) =
     
     let mutable code = ""
 
     let writeCode str = 
         code <- code + str
 
-    printfn "Enter data size:"
-    let datasize = int32 (System.Console.ReadLine())
-    printfn "Enter input:"
-    let inputData = System.Console.ReadLine()
-
-    let pathBuffers: Set<list<int> * PathBuffers> = 
+    let pathBuffers = 
         orderedPaths
-        |> List.map(fun x -> (x |> Set.map (fun (_ , path , buffer) -> path, buffer)))
         |> List.collect Set.toList
         |> Set.ofList
 
     let idBuffers: list<Set<int * PathBuffers>> = 
         orderedPaths
-        |> List.map(fun x -> (x |> Set.map (fun (id, _, buffer) -> id, buffer)))
+        |> List.map (fun x -> (x |> Set.map (fun (id, _, buffer) -> id, buffer)))
 
-    writeCode (generateHeader datasize)
+    writeCode (generateHeader)
     writeCode (generatePathCode dpn buffers pathBuffers)
-    let str = generateBody dpn buffers idBuffers inputData mnc 
+    let str = generateBody dpn buffers idBuffers parallelizePath mnc 
     writeCode str
-    writeCode (tabSpace + "if (!onlyTimeOutput) {")
-    writeCode (generateResultOutput dpn.outVars datasize)
+    writeCode (tabSpace + "if (!onlyTimeOutput) {\n" + tabSpace)
+    writeCode (generateResultOutput dpn.outVars)
     writeCode (generateArrayOutput dpn mnc) 
     writeCode (tabSpace + "}")
-    code + "\n}\n#endif"
+    code + "\n}"
     

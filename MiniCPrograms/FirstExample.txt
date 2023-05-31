@@ -1,0 +1,5 @@
+nat a,b,c; 
+thread t1 {  
+    b = a * 2;
+    c = a * 3 + b;        
+}  

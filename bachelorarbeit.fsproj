@@ -6,18 +6,20 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Types.fs"/>
-    <Compile Include="PathAnalyzer.fs"/>
-    <Compile Include="CommonWriter.fs"/>
-    <Compile Include="SingleThreadWriter.fs"/>
-    <Compile Include="CLWriter.fs"/>
-    <Compile Include="OpenMPWriter.fs"/>
-    <Compile Include="Translator.fs"/>
-    <Compile Include="Program.fs"/>
+    <Compile Include="Types.fs" />
+    <Compile Include="PathAnalyzer.fs" />
+    <Compile Include="CsvTable.fs" />
+    <Compile Include="CommonWriter.fs" />
+    <Compile Include="SingleThreadWriter.fs" />
+    <Compile Include="OpenCLWriter.fs" />
+    <Compile Include="OpenMPWriter.fs" />
+    <Compile Include="Translator.fs" />
+    <Compile Include="Program.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Averest" Version="3.0.1" />
+    <PackageReference Include="FSharp.Data" Version="5.0.2" />
   </ItemGroup>
 
 </Project>

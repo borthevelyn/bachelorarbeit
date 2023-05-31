@@ -1,0 +1,42 @@
+[4]nat x;
+[4]nat y;
+[5]nat s;
+
+thread RadixBAddCarryLookahead4 {
+    [4]bool g;
+    [4]bool p;
+    // preliminary sum digits
+    s[0] = x[0] + y[0];
+    s[1] = x[1] + y[1];
+    s[2] = x[2] + y[2];
+    s[3] = x[3] + y[3];
+    // initial generate conditions
+    g[0] = s[0]>255;
+    g[1] = s[1]>255;
+    g[2] = s[2]>255;
+    g[3] = s[3]>255;
+    // initial propagate conditions
+    p[0] = s[0]==255;
+    p[1] = s[1]==255;
+    p[2] = s[2]==255;
+    p[3] = s[3]==255;
+    // carry propagation prefix tree
+    // up-level 1
+    g[1] = g[0] & p[1] | g[1];
+    p[1] = p[1] & p[0];
+    g[3] = g[2] & p[3] | g[3];
+    p[3] = p[3] & p[2];
+    // up-level 2
+    g[3] = g[1] & p[3] | g[3];
+    p[3] = p[3] & p[1];
+    // down-level 4
+    // down-level 5
+    g[2] = g[1] & p[2] | g[2];
+    p[2] = p[2] & p[1];
+    // compute final sum digits
+    s[0] = s[0] % 256;
+    s[1] = (s[1]+(g[0]?1:0)) % 256;
+    s[2] = (s[2]+(g[1]?1:0)) % 256;
+    s[3] = (s[3]+(g[2]?1:0)) % 256;
+    s[4] = (g[3]?1:0);
+}

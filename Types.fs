@@ -9,7 +9,7 @@ exception CouldNotIdentifyVariableType
 exception CouldNotIdentifyNodeType
 
 /// <summary>
-/// Translates a given TypeC to an OpenCL type. None for those types which can't be translated.
+/// Translates a given TypeC to an C++ type. None for those types which can't be translated.
 /// </summary>
 let rec typeCtoStr tc =
     match tc with
@@ -27,9 +27,9 @@ let rec typeCtoStr tc =
 type ProducerKind =
     | Constant
     | Standard
-    // first is the buffer name of the previous array, second the index, third the name of the stored element
+    // first is the buffer name of the previous array, second the index, third the value of the stored element
     | Storer of string * string * string
-    // first is name of previous array, second is buffer name of index
+    // first is name of previous array, second is buffer name of index (loaded value?)
     | Loader of string * string
 
 and Buffer = {
@@ -77,11 +77,9 @@ let constructBuffer typeC name producer =
             Producer = producer
         }
 
-let rec buildBufferTypeLookup dpn (defs : Map<string, Buffer>) buffers : Map<string, Buffer> =
-    /// <summary>
-    /// Given a dpn, a table of predefined type of buffers and a buffer name, this function
-    /// will return the type of the given buffer name.
-    /// </summary>
+let buildBufferTypeLookup dpn (defs : Map<string, Buffer>) buffers : Map<string, Buffer> =
+
+
     let rec lookupBufferType dpn (defs : Map<string, Buffer>) buffer : Map<string, Buffer> =
         // look up in defined table
         match Map.tryFindKey (fun x _ -> x = buffer) defs with
@@ -112,14 +110,13 @@ let rec buildBufferTypeLookup dpn (defs : Map<string, Buffer>) buffers : Map<str
             | NotB | CastB -> returnStandardBuffer Cbool
             | CastN -> returnStandardBuffer Cnat
             | CastZ -> returnStandardBuffer Cint
-        | Const value -> returnConstantBuffer Cint
-        | Copy | Dup -> 
-            // recursively look one level down
+        | Const _ -> returnConstantBuffer Cint
+        | Copy | Dup | Join -> 
+            // recursively look one level up
             returnRecursion inA[0]
-        // Input type is Cbool and for output type look recursively one level down
+        // Input type is Cbool and for output type look recursively one level up
         | ParITE ->
-            returnRecursion inA[1]      
-        | Join -> returnRecursion inA[0]
+            returnRecursion inA[1]
         | Load _ -> 
             // load node has different outputs: one is a Carr and the other is the read value 
             let newDefs1 = lookupBufferType dpn defs inA[0]

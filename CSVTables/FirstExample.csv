@@ -1,0 +1,10 @@
+Benchmark,OneNodePath,Joined VertexDisjointPaths,Split VertexDisjointPaths
+Measurement,OneNodePath,Joined VertexDisjointPaths,Split VertexDisjointPaths
+Threads,8,3,3
+Number of nodes,8,8,8
+Minimum path length,1,1,1
+Maximum path length,1,4,4
+Average path length,1,2.6666666666666665,2.6666666666666665
+Maximum parallelized threads,3,1,1
+Paths after VertexDisjointCover,,3,3
+Deadlocks after VertexDisjointCover,,0,0
